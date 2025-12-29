@@ -1,0 +1,187 @@
+#cloud-config
+# DONT EDIT THE LINE ABOVE: cloud-config requires this specific header:
+# https://cloudinit.readthedocs.io/en/latest/explanation/format.html#headers-and-content-types
+
+# Tested with the following command:
+# hcloud server create --type cax31 --image ubuntu-24.04 --location fsn1 --user-data-from-file cloud-config.yml --name test-server-001
+
+users:
+  - name: root
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIzar/NaMqCf3tdFqOrNmqtyNO+r2NAeq+8U+NmT/vEO
+  - name: holu
+    groups: users, admin
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIzar/NaMqCf3tdFqOrNmqtyNO+r2NAeq+8U+NmT/vEO
+packages:
+  - git
+  - fail2ban
+  - ufw
+  - rsyslog
+  - unzip
+  - curl
+  - build-essential
+  - zoxide
+  - file
+  - ffmpeg
+  - p7zip-full
+  - jq
+  - poppler-utils
+  - fd-find
+  - ripgrep
+  - fzf
+  - imagemagick
+package_update: true
+package_upgrade: true
+write_files:
+  - path: /etc/ssh/sshd_config.d/ssh-hardening.conf
+    content: |
+      PermitRootLogin prohibit-password
+      PasswordAuthentication no
+      Port 2222
+      KbdInteractiveAuthentication no
+      ChallengeResponseAuthentication no
+      MaxAuthTries 10
+      AllowTcpForwarding no
+      X11Forwarding no
+      AllowAgentForwarding no
+      AuthorizedKeysFile .ssh/authorized_keys
+      AllowUsers holu root
+  - path: /home/holu/bin/install-fnm.sh
+    content: |
+      #!/bin/bash
+      set -e
+      
+      # Install fnm (Fast Node Manager)
+      curl -fsSL https://fnm.vercel.app/install | bash
+      
+      # Set up fnm environment
+      export PATH="/home/holu/.local/share/fnm:$PATH"
+      export SHELL=/bin/bash
+      eval "$(/home/holu/.local/share/fnm/fnm env --shell bash)"
+      
+      # Install and use LTS Node.js
+      /home/holu/.local/share/fnm/fnm install --lts
+      /home/holu/.local/share/fnm/fnm use lts-latest
+      
+      # Install opencode-ai globally
+      npm i -g opencode-ai@latest
+    owner: holu:holu
+    permissions: '0755'
+    defer: true
+  - path: /home/holu/bin/install-neovim.sh
+    content: |
+      #!/bin/bash
+      set -e
+      
+      # Create a temporary directory for the download
+      cd /tmp
+      
+      # Determine architecture and set the appropriate filename
+      ARCH=$(uname -m)
+      if [ "$ARCH" = "aarch64" ]; then
+          NVIM_APPIMAGE="nvim-linux-arm64.appimage"
+      elif [ "$ARCH" = "x86_64" ]; then
+          NVIM_APPIMAGE="nvim-linux-x86_64.appimage"
+      else
+          echo "Unsupported architecture: $ARCH"
+          exit 1
+      fi
+      
+      # Download and install Neovim AppImage
+      curl -LO "https://github.com/neovim/neovim/releases/latest/download/${NVIM_APPIMAGE}"
+      chmod u+x "${NVIM_APPIMAGE}"
+      
+      # Extract the AppImage
+      ./"${NVIM_APPIMAGE}" --appimage-extract
+      
+      # Move to system location
+      sudo mv squashfs-root /opt/nvim
+      sudo ln -sf /opt/nvim/AppRun /usr/local/bin/nvim
+      
+      # Clean up
+      rm -f "${NVIM_APPIMAGE}"
+      rm -rf squashfs-root
+      
+      # Install LazyVim starter configuration
+      cd ~
+      git clone https://github.com/LazyVim/starter ~/.config/nvim
+      
+      # Remove .git folder to make it your own config
+      rm -rf ~/.config/nvim/.git
+      
+      # Pre-install all LazyVim plugins
+      nvim --headless "+Lazy! sync" +qa
+    owner: holu:holu
+    permissions: '0755'
+    defer: true
+  - path: /home/holu/bin/install-yazi.sh
+    content: |
+      #!/bin/bash
+      set -e
+      
+      # Create a temporary directory for the download
+      cd /tmp
+      
+      # Determine architecture and set the appropriate download URL
+      ARCH=$(uname -m)
+      if [ "$ARCH" = "aarch64" ]; then
+          YAZI_ARCHIVE="yazi-aarch64-unknown-linux-gnu.zip"
+      elif [ "$ARCH" = "x86_64" ]; then
+          YAZI_ARCHIVE="yazi-x86_64-unknown-linux-gnu.zip"
+      else
+          echo "Unsupported architecture: $ARCH"
+          exit 1
+      fi
+      
+      # Download the latest release
+      RELEASE_URL="https://github.com/sxyazi/yazi/releases/latest/download/${YAZI_ARCHIVE}"
+      echo "Downloading Yazi from: ${RELEASE_URL}"
+      curl -LO "${RELEASE_URL}"
+      
+      # Extract the archive
+      unzip -q "${YAZI_ARCHIVE}"
+      
+      # Find and move the binaries
+      EXTRACTED_DIR="${YAZI_ARCHIVE%.zip}"
+      if [ -d "${EXTRACTED_DIR}" ]; then
+          sudo mv "${EXTRACTED_DIR}/yazi" /usr/local/bin/
+          sudo mv "${EXTRACTED_DIR}/ya" /usr/local/bin/
+          sudo chmod 755 /usr/local/bin/yazi /usr/local/bin/ya
+      else
+          echo "Error: Could not find extracted directory"
+          exit 1
+      fi
+      
+      # Clean up
+      rm -f "${YAZI_ARCHIVE}"
+      rm -rf "${EXTRACTED_DIR}"
+      
+      # Create config directory
+      mkdir -p ~/.config/yazi
+      
+      echo "Yazi installation completed successfully!"
+    owner: holu:holu
+    permissions: '0755'
+    defer: true
+runcmd:
+  - printf "[sshd]\nenabled = true\nport = ssh, 2222\nbanaction = iptables-multiport" > /etc/fail2ban/jail.local
+  - systemctl enable fail2ban
+  - ufw allow 2222
+  - ufw enable
+  - ['sh', '-c', 'curl -fsSL https://tailscale.com/install.sh | sh']
+  - ['su', '-c', '/home/holu/bin/install-fnm.sh', 'holu']
+  - ['su', '-c', '/home/holu/bin/install-neovim.sh', 'holu']
+  - ['su', '-c', '/home/holu/bin/install-yazi.sh', 'holu']
+  - echo "alias oc='opencode'" >> /home/holu/.bashrc
+  - echo "alias n='nvim'" >> /home/holu/.bashrc
+  - echo "alias r='yazi'" >> /home/holu/.bashrc
+  - echo "export EDITOR=nvim" >> /home/holu/.bashrc
+final_message: "The system is up, after $UPTIME seconds"
+power_state:
+  mode: reboot
+  message: Rebooting after initial setup
+  timeout: 30
+  condition: True
