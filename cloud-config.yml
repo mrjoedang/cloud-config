@@ -7,6 +7,9 @@
 # Tested with the following command:
 # hcloud server create --type cx23 --image ubuntu-24.04 --location nbg1 --user-data-from-file cloud-config.yml --name test-server-001
 #
+# Or fetch directly from GitHub:
+# hcloud server create --type cx23 --image ubuntu-24.04 --location nbg1 --user-data-from-file <(curl -fsSL https://raw.githubusercontent.com/mrjoedang/cloud-config/main/cloud-config.yml) --name test-server-001
+#
 # After setup, run:
 # ssh holu@<server-ip> -p 2222
 #
